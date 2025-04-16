@@ -1,0 +1,145 @@
+- name: Manage Foreman Content Views
+  hosts: localhost
+  gather_facts: false
+  vars:
+    foreman_server_url: "{{ server_url | default('https://foreman.domain.com') }}"
+    foreman_username: "{{ frm_username | default('admin') }}"
+    foreman_password: "{{ frm_password | default('changeme!') }}"
+    target_environment: "{{ lifecycle_environment | default('Production') }}"
+    organization: "{{ org | default('Not Redhat') }}"
+    keep_versions: "{{ max_versions | default('2') }}"
+
+  tasks:
+    - name: Get all content views
+      theforeman.foreman.content_view_info:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+      register: content_views
+      tags:
+        - publish
+        - cleanup
+        - promote-only
+
+    - name: Debug target target_environment
+      ansible.builtin.debug:
+        msg: "{{ target_environment }}"
+      tags:
+        - publish
+        - cleanup
+        - promote-only
+
+    - name: Publish a new version of each content view
+      theforeman.foreman.content_view_version:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+        content_view: "{{ item.name }}"
+      loop: "{{ content_views.content_views }}"
+      when: not item.composite and 'Default Organization View' not in item.name
+      ignore_errors: true
+      tags:
+        - publish
+        - cv
+      loop_control:
+        pause: 300
+
+    - name: Sleep for 300 seconds until all background stuff is done
+      ansible.builtin.wait_for:
+        timeout: 300
+      delegate_to: localhost
+      tags:
+        - publish
+        - promote
+
+    - name: "Publish CCVs"
+      theforeman.foreman.content_view_version:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+        content_view: "{{ item.name }}"
+        # lifecycle_environments: "{{ target_environment }}"
+      loop: "{{ content_views.content_views }}"
+      loop_control:
+        pause: 300
+      when: item.composite and 'Default Organization View' not in item.name
+      ignore_errors: true
+      tags:
+        - publish
+        - ccv
+
+    - name: "Ensure CCVs are on enviroment {{ target_environment }}"
+      theforeman.foreman.content_view_version:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+        content_view: "{{ item.name }}"
+        version: "{{ item.latest_version }}"
+        lifecycle_environments: "{{ target_environment }}"
+      loop: "{{ content_views.content_views }}"
+      loop_control:
+        pause: 300
+      when: item.composite and 'Default Organization View' not in item.name and not
+        (item.latest_version_environments | selectattr('name', 'equalto', target_environment) | list | length > 0)
+      ignore_errors: true
+      tags:
+        - publish
+        - promote-only
+
+    - name: Sleep for 300 seconds until all background stuff is done
+      ansible.builtin.wait_for:
+        timeout: 300
+      delegate_to: localhost
+      tags:
+        - publish
+        - promote-only
+
+    - name: "Clean up versions of each CCV. Versions to keep: {{ keep_versions }}"
+      theforeman.foreman.content_view_version:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+        content_view: "{{ item.name }}"
+        version: "{{ (item.latest_version | float - keep_versions | float) | string }}"
+        state: absent
+      when: (item.latest_version | float - keep_versions | float > keep_versions | float) and
+            'Default Organization View' not in item.name and
+            item.composite
+      loop: "{{ content_views.content_views }}"
+      loop_control:
+        pause: 600
+      ignore_errors: true
+      tags:
+        - cleanup
+        - ccv
+
+    - name: "Clean up versions of each CV. Versions to keep: {{ keep_versions }}"
+      theforeman.foreman.content_view_version:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
+        content_view: "{{ item.name }}"
+        version: "{{ (item.latest_version | float - keep_versions | float) | string }}"
+        state: absent
+      when: (item.latest_version | float - keep_versions | float > keep_versions | float) and
+            'Default Organization View' not in item.name and
+            not item.composite
+      loop: "{{ content_views.content_views }}"
+      loop_control:
+        pause: 600
+      ignore_errors: true
+      tags:
+        - cleanup
+        - cv
