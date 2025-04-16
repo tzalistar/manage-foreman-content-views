@@ -9,8 +9,9 @@ This playbook automates the management of [Foreman](https://theforeman.org/) Con
 
 ## Table of Contents
 
-  - [Table of Contents](#table-of-contents)
+  
   - [Overview](#overview)
+  - [Table of Contents](#table-of-contents)
   - [Prerequisites](#prerequisites)
   - [Variables](#variables)
   - [Playbook Structure](#playbook-structure)
