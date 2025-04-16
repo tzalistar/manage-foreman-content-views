@@ -1,12 +1,14 @@
-# Managing Foreman Content Views with Ansible: A Markdown Guide
+## Overview
 
-This guide provides clear, well-structured documentation in Markdown for the provided Ansible playbook. Each section explains a part of the playbook and includes code blocks for clarity.
+This playbook automates the management of [Foreman](https://theforeman.org/) Content Views (CVs) and Composite Content Views (CCVs):
 
----
+- Publishes new versions of CVs and CCVs
+- Promotes CCVs to a specified lifecycle environment
+- Cleans up old versions, keeping only a set number of the latest
+
 
 ## Table of Contents
 
-- [Managing Foreman Content Views with Ansible: A Markdown Guide](#managing-foreman-content-views-with-ansible-a-markdown-guide)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Prerequisites](#prerequisites)
@@ -25,13 +27,7 @@ This guide provides clear, well-structured documentation in Markdown for the pro
 
 ---
 
-## Overview
 
-This playbook automates the management of [Foreman](https://theforeman.org/) Content Views (CVs) and Composite Content Views (CCVs):
-
-- Publishes new versions of CVs and CCVs
-- Promotes CCVs to a specified lifecycle environment
-- Cleans up old versions, keeping only a set number of the latest
 
 ---
 
