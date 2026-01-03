@@ -2,15 +2,6 @@
   hosts: localhost
   gather_facts: false
 
-  # Module defaults to avoid repeating connection parameters
-  module_defaults:
-    group/theforeman.foreman.foreman:
-      server_url: "{{ foreman_server_url }}"
-      username: "{{ foreman_username }}"
-      password: "{{ foreman_password }}"
-      organization: "{{ organization }}"
-      validate_certs: false
-
   vars:
     foreman_server_url: "{{ server_url | default('https://foreman.something.org') }}"
     foreman_username: "{{ frm_username | default('admin') }}"
