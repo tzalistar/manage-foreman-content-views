@@ -45,7 +45,7 @@ ansible-galaxy collection install theforeman.foreman
 The playbook uses `module_defaults` to avoid repeating connection parameters in every task, making the code cleaner and more maintainable:
 
 ```yaml
-{% raw %}
+
 module_defaults:
   group/theforeman.foreman.foreman:
     server_url: "{{ foreman_server_url }}"
@@ -53,7 +53,7 @@ module_defaults:
     password: "{{ foreman_password }}"
     organization: "{{ organization }}"
     validate_certs: false
-{% endraw %}
+
 ```
 
 ### Variables
@@ -61,10 +61,10 @@ module_defaults:
 You can override these variables via `--extra-vars` or in your inventory.
 
 ```yaml
-{% raw %}
+
 vars:
   pause_value: "{{ pause | default('120') }}"  # Increased from 60s to 120s
-{% endraw %}
+
 ```
 
 | Variable                | Default Value            | Description                                         |
@@ -86,7 +86,7 @@ The playbook follows a carefully orchestrated workflow to ensure proper content 
 ### 1. Health Check and Initialization
 
 ```yaml
-{% raw %}
+
 - name: Check Foreman API health
   uri:
     url: "{{ foreman_server_url }}/api/status"
@@ -100,7 +100,7 @@ The playbook follows a carefully orchestrated workflow to ensure proper content 
   delay: 10
   tags:
     - always
-{% endraw %}
+
 ```
 
 Verifies Foreman API is accessible before proceeding. Retries up to 3 times with 10-second delays.
@@ -112,7 +112,7 @@ Verifies Foreman API is accessible before proceeding. Retries up to 3 times with
 Retrieves all Content Views in the organization and displays useful counts:
 
 ```yaml
-{% raw %}
+
 - name: Get all content views
   theforeman.foreman.content_view_info:
   register: content_views
@@ -127,7 +127,7 @@ Retrieves all Content Views in the organization and displays useful counts:
       Total content views: {{ content_views.content_views | length }}
       Regular CVs: {{ content_views.content_views | selectattr('composite', 'equalto', false) | list | length }}
       Composite CVs: {{ content_views.content_views | selectattr('composite', 'equalto', true) | list | length }}
-{% endraw %}
+
 ```
 
 ---
@@ -137,7 +137,7 @@ Retrieves all Content Views in the organization and displays useful counts:
 Publishes new versions of non-composite CVs with proper error handling:
 
 ```yaml
-{% raw %}
+
 - name: Publish a new version of each regular content view
   theforeman.foreman.content_view_version:
     content_view: "{{ item.name }}"
@@ -162,7 +162,7 @@ Publishes new versions of non-composite CVs with proper error handling:
     - cv_publish_result.results is defined
     - item.failed is defined
     - item.failed
-{% endraw %}
+
 ```
 
 **Key Features:**
@@ -178,7 +178,7 @@ Publishes new versions of non-composite CVs with proper error handling:
 Instead of blind waits, the playbook polls the Foreman Tasks API:
 
 ```yaml
-{% raw %}
+
 - name: Wait for CV publish tasks to complete (via tasks API)
   uri:
     url: "{{ foreman_server_url }}/foreman_tasks/api/tasks?search=label=Actions::Katello::ContentView::Publish+AND+state=running"
@@ -198,7 +198,7 @@ Instead of blind waits, the playbook polls the Foreman Tasks API:
     timeout: 180  # 3 minutes fallback wait
   delegate_to: localhost
   when: running_cv_tasks.status == 404
-{% endraw %}
+
 ```
 
 **Benefits:**
@@ -214,7 +214,7 @@ Instead of blind waits, the playbook polls the Foreman Tasks API:
 Similar to regular CVs, but CCVs include the newly published CV versions:
 
 ```yaml
-{% raw %}
+
 - name: Publish CCVs (includes newly published CV versions)
   theforeman.foreman.content_view_version:
     content_view: "{{ item.name }}"
@@ -227,7 +227,7 @@ Similar to regular CVs, but CCVs include the newly published CV versions:
   loop_control:
     pause: "{{ pause_value }}"
     label: "{{ item.name }}"
-{% endraw %}
+
 ```
 
 Includes the same error handling and task polling as regular CVs.
@@ -239,7 +239,7 @@ Includes the same error handling and task polling as regular CVs.
 **This step is crucial** - after publishing CCVs, we must re-fetch content views to get the latest version numbers:
 
 ```yaml
-{% raw %}
+
 - name: Re-fetch content views to get latest CCV versions after publish
   theforeman.foreman.content_view_info:
   register: content_views_updated
@@ -247,7 +247,7 @@ Includes the same error handling and task polling as regular CVs.
     - publish
     - ccv
     - promote-only
-{% endraw %}
+
 ```
 
 **Why This Matters:**
@@ -262,7 +262,7 @@ Includes the same error handling and task polling as regular CVs.
 Uses the **freshly fetched** content views to promote with correct version numbers:
 
 ```yaml
-{% raw %}
+
 - name: "Promote CCVs to {{ target_environment }}"
   theforeman.foreman.content_view_version:
     content_view: "{{ item.name }}"
@@ -277,7 +277,7 @@ Uses the **freshly fetched** content views to promote with correct version numbe
   until: ccv_promote_result is succeeded
   retries: 5
   delay: 30
-{% endraw %}
+
 ```
 
 **Key Features:**
@@ -295,7 +295,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
 #### Step 8a: Identify Protected Versions
 
 ```yaml
-{% raw %}
+
 # Build a list of CV versions that are used by CCVs (protected from deletion)
 - name: "Get all CV versions used by CCVs"
   theforeman.foreman.content_view_version_info:
@@ -307,7 +307,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
 - name: "Set fact for protected CV versions"
   ansible.builtin.set_fact:
     protected_versions: "{{ protected_versions | default([]) + (ccv_component_versions.results | reject('skipped') | map(attribute='content_view_versions', default=[]) | flatten | map(attribute='version') | list) }}"
-{% endraw %}
+
 ```
 
 **Why This Matters:**
@@ -318,7 +318,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
 #### Step 8b: Delete Old CCV Versions
 
 ```yaml
-{% raw %}
+
 - name: "Delete old versions of CCVs (keeping last {{ keep_versions }})"
   theforeman.foreman.content_view_version:
     content_view: "{{ item.0.item.name }}"
@@ -332,7 +332,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
     - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
   register: ccv_delete_result
   failed_when: false
-{% endraw %}
+
 ```
 
 **Logic Explanation:**
@@ -348,7 +348,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
 #### Step 8c: Delete Old CV Versions (with Protection)
 
 ```yaml
-{% raw %}
+
 - name: "Delete old versions of CVs (keeping last {{ keep_versions }} + protected)"
   theforeman.foreman.content_view_version:
     content_view: "{{ item.0.item.name }}"
@@ -363,7 +363,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
     - item.1.version not in protected_versions  # CRITICAL: Don't delete versions used by CCVs
   register: cv_delete_result
   failed_when: false
-{% endraw %}
+
 ```
 
 **Additional Protection:**
@@ -378,7 +378,7 @@ The cleanup phase has sophisticated logic to prevent deletion of protected versi
 Displays comprehensive completion statistics:
 
 ```yaml
-{% raw %}
+
 - name: Display completion summary
   ansible.builtin.debug:
     msg: |
@@ -393,7 +393,7 @@ Displays comprehensive completion statistics:
       ========================================
   tags:
     - always
-{% endraw %}
+
 ```
 
 **Shows:**
@@ -626,7 +626,7 @@ This playbook has undergone significant evolution from the original version. Her
 
 **Before:**
 ```yaml
-{% raw %}
+
 - name: Publish content view
   theforeman.foreman.content_view_version:
     server_url: "{{ foreman_server_url }}"
@@ -635,12 +635,12 @@ This playbook has undergone significant evolution from the original version. Her
     organization: "{{ organization }}"
     validate_certs: false
     content_view: "{{ item.name }}"
-{% endraw %}
+
 ```
 
 **After:**
 ```yaml
-{% raw %}
+
 module_defaults:
   group/theforeman.foreman.foreman:
     server_url: "{{ foreman_server_url }}"
@@ -652,7 +652,7 @@ module_defaults:
 - name: Publish content view
   theforeman.foreman.content_view_version:
     content_view: "{{ item.name }}"
-{% endraw %}
+
 ```
 
 **Benefits:** Cleaner code, easier to maintain, reduced repetition
@@ -668,7 +668,7 @@ module_defaults:
 
 **After:**
 ```yaml
-{% raw %}
+
 - name: Wait for CV publish tasks to complete (via tasks API)
   uri:
     url: "{{ foreman_server_url }}/foreman_tasks/api/tasks?search=label=Actions::Katello::ContentView::Publish+AND+state=running"
@@ -677,7 +677,7 @@ module_defaults:
   until: (running_cv_tasks.json.total | default(0)) == 0 or running_cv_tasks.status == 404
   retries: 60
   delay: 30
-{% endraw %}
+
 ```
 
 **Benefits:**
@@ -694,7 +694,7 @@ module_defaults:
 
 **The Solution:**
 ```yaml
-{% raw %}
+
 # After publishing, re-fetch to get latest version numbers
 - name: Re-fetch content views to get latest CCV versions after publish
   theforeman.foreman.content_view_info:
@@ -703,7 +703,7 @@ module_defaults:
 # Use UPDATED data for promotion
 - name: "Promote CCVs to {{ target_environment }}"
   loop: "{{ content_views_updated.content_views }}"  # Not content_views!
-{% endraw %}
+
 ```
 
 **Impact:** Eliminated 100% of promotion failures due to stale version numbers
@@ -717,7 +717,7 @@ module_defaults:
 
 **The Solution:**
 ```yaml
-{% raw %}
+
 # Build list of protected versions
 - name: "Get all CV versions used by CCVs"
   register: ccv_component_versions
@@ -730,7 +730,7 @@ module_defaults:
 - name: "Delete old versions of CVs"
   when:
     - item.1.version not in protected_versions  # CRITICAL
-{% endraw %}
+
 ```
 
 **Impact:** Cleanup now succeeds instead of failing, no orphaned versions
@@ -744,7 +744,7 @@ ignore_errors: true
 
 **After:**
 ```yaml
-{% raw %}
+
 - name: Publish content view
   register: cv_publish_result
   failed_when: false  # Continue on errors
@@ -758,7 +758,7 @@ ignore_errors: true
   when:
     - item.failed is defined
     - item.failed
-{% endraw %}
+
 ```
 
 **Benefits:**
@@ -773,7 +773,7 @@ ignore_errors: true
 
 **After:**
 ```yaml
-{% raw %}
+
 - name: Display completion summary
   msg: |
     ========================================
@@ -785,7 +785,7 @@ ignore_errors: true
     CCV Versions Deleted: 15
     CV Versions Deleted: 20
     ========================================
-{% endraw %}
+
 ```
 
 **Benefits:**
@@ -797,19 +797,19 @@ ignore_errors: true
 
 **Old Logic (Broken):**
 ```yaml
-{% raw %}
+
 version: "{{ (item.latest_version | float - keep_versions | float) | string }}"
-{% endraw %}
+
 ```
 This tried to delete a single calculated version, which might not exist.
 
 **New Logic (Correct):**
 ```yaml
-{% raw %}
+
 loop: "{{ ccv_versions_to_delete.results | subelements('content_view_versions', skip_missing=True) }}"
 when:
   - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
-{% endraw %}
+
 ```
 
 **How It Works:**
