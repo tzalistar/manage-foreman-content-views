@@ -1,36 +1,43 @@
+---
+# Foreman Content View Management Playbook
+#
+# This playbook automates the lifecycle management of Foreman/Katello content views:
+# - Publishes regular Content Views (CVs)
+# - Publishes Composite Content Views (CCVs)
+# - Promotes CCVs to target lifecycle environment
+# - Cleans up old versions (keeping last 2 by default)
+#
+# Usage:
+#   Full workflow:    ansible-playbook manage-content-views.yaml
+#   Publish only:     ansible-playbook manage-content-views.yaml --tags publish
+#   Promote only:     ansible-playbook manage-content-views.yaml --tags promote
+#   Cleanup only:     ansible-playbook manage-content-views.yaml --tags cleanup
+#
+
 - name: Manage Foreman Content Views
   hosts: localhost
   gather_facts: false
 
-    # Module defaults to avoid repeating connection parameters
-  module_defaults:
-    group/theforeman.foreman.foreman:
-      server_url: "{{ foreman_server_url }}"
-      username: "{{ foreman_username }}"
-      password: "{{ foreman_password }}"
-      organization: "{{ organization }}"
-      validate_certs: false
-
   vars:
-    foreman_server_url: "{{ server_url | default('https://foreman.something.org') }}"
+    foreman_server_url: "{{ server_url | default('https://foreman.tzalistar.me') }}"
     foreman_username: "{{ frm_username | default('admin') }}"
     foreman_password: "{{ frm_password | default('changeme!') }}"
     target_environment: "{{ lifecycle_environment | default('Production') }}"
-    organization: "{{ org | default('Some Org') }}"
+    organization: "{{ org | default('Tzalistar Systems') }}"
     keep_versions: "{{ max_versions | default('2') }}"
-    pause_value: "{{ pause | default('120') }}"  # Increased from 60s to 120s
+    pause_value: "{{ pause | default('120') }}"
 
   vars_files:
-    - "{{ playbook_dir }}/../../vault/vault.yaml" # In case you use vault to store sensitive variables
+    - ../../vault/vault.yaml # Relative vault path to the playbook, your scenario may differ.
 
   tasks:
 
     - name: Check Foreman API health
-      uri:
+      ansible.builtin.uri:
         url: "{{ foreman_server_url }}/api/status"
         user: "{{ foreman_username }}"
         password: "{{ foreman_password }}"
-        force_basic_auth: yes
+        force_basic_auth: true
         validate_certs: false
         status_code: 200
       register: health_check
@@ -41,11 +48,16 @@
 
     - name: Get all content views
       theforeman.foreman.content_view_info:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       register: content_views
       tags:
         - publish
         - cleanup
-        - promote-only
+        - promote
 
     - name: Debug target environment
       ansible.builtin.debug:
@@ -53,7 +65,7 @@
       tags:
         - publish
         - cleanup
-        - promote-only
+        - promote
 
     - name: Display content view counts
       ansible.builtin.debug:
@@ -64,7 +76,7 @@
       tags:
         - publish
         - cleanup
-        - promote-only
+        - promote
 
     # ========================================
     # STEP 1: Publish Regular Content Views
@@ -73,6 +85,11 @@
     - name: Publish a new version of each regular content view
       theforeman.foreman.content_view_version:
         content_view: "{{ item.name }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ content_views.content_views }}"
       when:
         - not item.composite
@@ -99,11 +116,11 @@
         - cv
 
     - name: Wait for CV publish tasks to complete (via tasks API)
-      uri:
+      ansible.builtin.uri:
         url: "{{ foreman_server_url }}/foreman_tasks/api/tasks?search=label=Actions::Katello::ContentView::Publish+AND+state=running"
         user: "{{ foreman_username }}"
         password: "{{ foreman_password }}"
-        force_basic_auth: yes
+        force_basic_auth: true
         validate_certs: false
         status_code: [200, 404]  # Accept 404 if tasks API not available
       register: running_cv_tasks
@@ -131,6 +148,11 @@
     - name: Publish CCVs (includes newly published CV versions)
       theforeman.foreman.content_view_version:
         content_view: "{{ item.name }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ content_views.content_views }}"
       when:
         - item.composite
@@ -157,11 +179,11 @@
         - ccv
 
     - name: Wait for CCV publish tasks to complete (via tasks API)
-      uri:
+      ansible.builtin.uri:
         url: "{{ foreman_server_url }}/foreman_tasks/api/tasks?search=label=Actions::Katello::ContentView::Publish+AND+state=running"
         user: "{{ foreman_username }}"
         password: "{{ foreman_password }}"
-        force_basic_auth: yes
+        force_basic_auth: true
         validate_certs: false
         status_code: [200, 404]  # Accept 404 if tasks API not available
       register: running_ccv_tasks
@@ -172,7 +194,7 @@
       tags:
         - publish
         - ccv
-        - promote-only
+        - promote
 
     - name: Fallback wait for CCV publish (if tasks API unavailable)
       ansible.builtin.wait_for:
@@ -182,7 +204,7 @@
       tags:
         - publish
         - ccv
-        - promote-only
+        - promote
 
     # ========================================
     # STEP 3: Re-fetch to get LATEST versions
@@ -190,11 +212,17 @@
 
     - name: Re-fetch content views to get latest CCV versions after publish
       theforeman.foreman.content_view_info:
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       register: content_views_updated
       tags:
         - publish
         - ccv
-        - promote-only
+        - promote
+        - cleanup
 
     - name: Debug - Show CCV versions before promotion
       ansible.builtin.debug:
@@ -211,8 +239,8 @@
       loop_control:
         label: "{{ item.name }}"
       tags:
-        - publish
-        - promote-only
+        - promote
+        - cleanup
 
     # ========================================
     # STEP 4: Promote CCVs to Target Environment
@@ -223,6 +251,11 @@
         content_view: "{{ item.name }}"
         version: "{{ item.latest_version }}"
         lifecycle_environments: "{{ target_environment }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ content_views_updated.content_views }}"
       when:
         - item.composite
@@ -236,8 +269,7 @@
         pause: "{{ pause_value }}"
         label: "{{ item.name }} v{{ item.latest_version }}"
       tags:
-        - publish
-        - promote-only
+        - promote
 
     - name: Report CCV promotion failures
       ansible.builtin.debug:
@@ -248,15 +280,14 @@
         - item.failed is defined
         - item.failed
       tags:
-        - publish
-        - promote-only
+        - promote
 
     - name: Wait for CCV promotion tasks to complete (via tasks API)
-      uri:
+      ansible.builtin.uri:
         url: "{{ foreman_server_url }}/foreman_tasks/api/tasks?search=label=Actions::Katello::ContentView::Promote+AND+state=running"
         user: "{{ foreman_username }}"
         password: "{{ foreman_password }}"
-        force_basic_auth: yes
+        force_basic_auth: true
         validate_certs: false
         status_code: [200, 404]  # Accept 404 if tasks API not available
       register: running_promote_tasks
@@ -265,8 +296,7 @@
       delay: 30
       failed_when: false  # Don't fail if tasks API unavailable, just continue
       tags:
-        - publish
-        - promote-only
+        - promote
 
     - name: Fallback wait for CCV promotion (if tasks API unavailable)
       ansible.builtin.wait_for:
@@ -274,8 +304,7 @@
       delegate_to: localhost
       when: running_promote_tasks.status == 404
       tags:
-        - publish
-        - promote-only
+        - promote
 
     # ========================================
     # STEP 5: Cleanup Old Versions
@@ -292,6 +321,11 @@
     - name: "Get versions to delete for CCVs"
       theforeman.foreman.content_view_version_info:
         content_view: "{{ item.name }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ content_views.content_views }}"
       loop_control:
         label: "{{ item.name }}"
@@ -322,17 +356,26 @@
         - ccv
 
     # Delete old versions of each CCV, skipping versions that are still in use
-    - name: "Delete old versions of CCVs (keeping last {{ keep_versions }})"
+    - name: "Delete old versions of CCVs {{ keep_versions }}"
       theforeman.foreman.content_view_version:
         content_view: "{{ item.0.item.name }}"
         version: "{{ item.1.version }}"
         state: absent
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ ccv_versions_to_delete.results | subelements('content_view_versions', skip_missing=True) }}"
+      vars:
+        ccv_version_index: >-
+          {{ (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) }}
+        ccv_versions_to_remove: "{{ (item.0.content_view_versions | length) - (keep_versions | int) }}"
       when:
         - item.0.content_view_versions is defined
         - (item.0.content_view_versions | length) > (keep_versions | int)
         - item.1.version is defined
-        - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
+        - ccv_version_index < ccv_versions_to_remove
       register: ccv_delete_result
       failed_when: false  # Don't stop on failure
       loop_control:
@@ -345,13 +388,19 @@
     # Log any failures during CCV version deletion for review
     - name: "Log failed CCV version deletions"
       ansible.builtin.debug:
-        msg: "Failed to delete version {{ item.1.version }} of CCV {{ item.0.item.name }}: {{ item.msg | default('In use or protected') }}"
+        msg: |
+          Failed to delete version {{ item.1.version }} of CCV {{ item.0.item.name }}:
+          {{ item.msg | default('In use or protected') }}
       loop: "{{ ccv_versions_to_delete.results | subelements('content_view_versions', skip_missing=True) }}"
+      vars:
+        ccv_version_index: >-
+          {{ (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) }}
+        ccv_versions_to_remove: "{{ (item.0.content_view_versions | length) - (keep_versions | int) }}"
       when:
         - item.0.content_view_versions is defined
         - (item.0.content_view_versions | length) > (keep_versions | int)
         - item.1.version is defined
-        - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
+        - ccv_version_index < ccv_versions_to_remove
         - item.1.failed is defined and item.1.failed
       loop_control:
         label: "{{ item.0.item.name }} v{{ item.1.version }}"
@@ -364,6 +413,11 @@
     - name: "Get all CV versions used by CCVs"
       theforeman.foreman.content_view_version_info:
         content_view: "{{ item.name }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       register: ccv_component_versions
       when: item.composite
       loop: "{{ content_views.content_views }}"
@@ -376,7 +430,11 @@
     # Build a list of protected CV versions that should not be deleted
     - name: "Set fact for protected CV versions"
       ansible.builtin.set_fact:
-        protected_versions: "{{ protected_versions | default([]) + (ccv_component_versions.results | reject('skipped') | map(attribute='content_view_versions', default=[]) | flatten | map(attribute='version') | list) }}"
+        protected_versions: >-
+          {{ protected_versions | default([]) +
+             (ccv_component_versions.results | reject('skipped') |
+              map(attribute='content_view_versions', default=[]) | flatten |
+              map(attribute='version') | list) }}
       tags:
         - publish
         - cleanup
@@ -392,6 +450,11 @@
     - name: "Get versions to delete for CVs"
       theforeman.foreman.content_view_version_info:
         content_view: "{{ item.name }}"
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ content_views.content_views }}"
       loop_control:
         label: "{{ item.name }}"
@@ -405,17 +468,26 @@
         - cv
 
     # Delete old versions of each CV, skipping versions that are protected or still in use
-    - name: "Delete old versions of CVs (keeping last {{ keep_versions }} + protected)"
+    - name: "Delete old CV versions + protected {{ keep_versions }}"
       theforeman.foreman.content_view_version:
         content_view: "{{ item.0.item.name }}"
         version: "{{ item.1.version }}"
         state: absent
+        server_url: "{{ foreman_server_url }}"
+        username: "{{ foreman_username }}"
+        password: "{{ foreman_password }}"
+        organization: "{{ organization }}"
+        validate_certs: false
       loop: "{{ cv_versions_to_delete.results | subelements('content_view_versions', skip_missing=True) }}"
+      vars:
+        cv_version_index: >-
+          {{ (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) }}
+        cv_versions_to_remove: "{{ (item.0.content_view_versions | length) - (keep_versions | int) }}"
       when:
         - item.0.content_view_versions is defined
         - (item.0.content_view_versions | length) > (keep_versions | int)
         - item.1.version is defined
-        - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
+        - cv_version_index < cv_versions_to_remove
         - item.1.version not in protected_versions
       register: cv_delete_result
       failed_when: false  # Don't stop on failure
@@ -429,13 +501,19 @@
     # Log any failures during CV version deletion for review
     - name: "Log failed CV version deletions"
       ansible.builtin.debug:
-        msg: "Failed to delete version {{ item.1.version }} of CV {{ item.0.item.name }}: {{ item.msg | default('In use or protected') }}"
+        msg: |
+          Failed to delete version {{ item.1.version }} of CV {{ item.0.item.name }}:
+          {{ item.msg | default('In use or protected') }}
       loop: "{{ cv_versions_to_delete.results | subelements('content_view_versions', skip_missing=True) }}"
+      vars:
+        cv_version_index: >-
+          {{ (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) }}
+        cv_versions_to_remove: "{{ (item.0.content_view_versions | length) - (keep_versions | int) }}"
       when:
         - item.0.content_view_versions is defined
         - (item.0.content_view_versions | length) > (keep_versions | int)
         - item.1.version is defined
-        - (item.0.content_view_versions | map(attribute='version') | sort | list).index(item.1.version) < (item.0.content_view_versions | length - keep_versions | int)
+        - cv_version_index < cv_versions_to_remove
         - item.1.version not in protected_versions
         - item.1.failed is defined and item.1.failed
       loop_control:
